@@ -233,45 +233,34 @@ class 自媒体内容生成器:
         print("📱 步骤5: 创建自媒体图文内容")
         print("=" * 70)
         
-        # 获取最新的热点总结
-        总结文件列表 = [f for f in os.listdir(self.输出文件夹['热点分析报告']) if f.endswith('.md')]
-        
-        if not 总结文件列表:
-            print("❌ 未找到热点总结文件")
-            return
-        
-        最新总结 = sorted(总结文件列表)[-1]
-        总结路径 = os.path.join(self.输出文件夹['热点分析报告'], 最新总结)
-        
-        with open(总结路径, 'r', encoding='utf-8') as f:
-            总结内容 = f.read()
-        
-        # 创建自媒体格式内容
-        现在 = datetime.now()
-        基础文件名 = 现在.strftime("%Y%m%d_%H%M%S")
-        
-        # 小红书风格
-        小红书内容 = self._创建小红书格式(总结内容, 图片链接列表, 现在)
-        小红书路径 = os.path.join(self.输出文件夹['自媒体内容'], f"{基础文件名}_小红书.md")
-        with open(小红书路径, 'w', encoding='utf-8') as f:
-            f.write(小红书内容)
-        print(f"✅ 小红书内容: {os.path.basename(小红书路径)}")
-        
-        # 抖音文案风格
-        抖音内容 = self._创建抖音格式(总结内容, 图片链接列表, 现在)
-        抖音路径 = os.path.join(self.输出文件夹['自媒体内容'], f"{基础文件名}_抖音.md")
-        with open(抖音路径, 'w', encoding='utf-8') as f:
-            f.write(抖音内容)
-        print(f"✅ 抖音内容: {os.path.basename(抖音路径)}")
-        
-        # 微信公众号风格
-        公众号内容 = self._创建公众号格式(总结内容, 图片链接列表, 现在)
-        公众号路径 = os.path.join(self.输出文件夹['自媒体内容'], f"{基础文件名}_公众号.md")
-        with open(公众号路径, 'w', encoding='utf-8') as f:
-            f.write(公众号内容)
-        print(f"✅ 公众号内容: {os.path.basename(公众号路径)}")
-        
-        print(f"\n🎉 所有自媒体内容已生成！")
+        try:
+            sys.path.insert(0, self.核心模块目录)
+            from 自媒体内容生成器 import 自媒体内容生成器
+            
+            生成器 = 自媒体内容生成器()
+            
+            分析报告 = 生成器.读取最新分析报告()
+            
+            if not 分析报告:
+                print("❌ 未找到分析报告")
+                return
+            
+            小红书内容 = 生成器.生成小红书内容(分析报告, 图片链接列表)
+            小红书路径 = 生成器.保存内容(小红书内容, "小红书")
+            print(f"✅ 小红书内容: {os.path.basename(小红书路径)}")
+            
+            抖音内容 = 生成器.生成抖音内容(分析报告, 图片链接列表)
+            抖音路径 = 生成器.保存内容(抖音内容, "抖音")
+            print(f"✅ 抖音内容: {os.path.basename(抖音路径)}")
+            
+            公众号内容 = 生成器.生成公众号内容(分析报告, 图片链接列表)
+            公众号路径 = 生成器.保存内容(公众号内容, "公众号")
+            print(f"✅ 公众号内容: {os.path.basename(公众号路径)}")
+            
+            print(f"\n🎉 所有自媒体内容已生成！")
+            
+        except Exception as 错误:
+            print(f"❌ 生成失败: {str(错误)}")
     
     def _创建小红书格式(self, 总结: str, 图片列表: List[Dict], 时间: datetime) -> str:
         """创建小红书格式内容"""
