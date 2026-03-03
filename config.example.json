@@ -1,0 +1,9 @@
+{
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "your_deepseek_api_key_here"
+    },
+    "coze": {
+        "api_url": "https://your-coze-api-url/api/generate-image"
+    }
+}
