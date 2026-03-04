@@ -177,11 +177,11 @@ class 自媒体内容生成器:
         
         API地址 = self.配置['coze']['api_url']
         
-        for i, 提示词数据 in enumerate(提示词列表[:3], 1):  # 最多生成3张
+        for i, 提示词数据 in enumerate(提示词列表[:5], 1):  # 最多生成5张
             英文提示词 = 提示词数据.get('english_prompt', '')
             话题标题 = 提示词数据.get('topic_title', f'热点{i}')
             
-            print(f"\n【{i}/{min(len(提示词列表), 3)}】生成图片: {话题标题[:30]}...")
+            print(f"\n【{i}/{min(len(提示词列表), 5)}】生成图片: {话题标题[:30]}...")
             print(f"提示词: {英文提示词[:60]}...")
             
             请求数据 = {
