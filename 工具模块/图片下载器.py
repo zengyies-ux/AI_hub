@@ -18,8 +18,16 @@ from pathlib import Path
 class 图片下载器:
     """图片自动下载器"""
     
-    def __init__(self, 输出目录: str = "输出文件/生成的图片"):
-        self.基础目录 = 输出目录
+    def __init__(self, 输出目录: str = None):
+        # 如果未指定输出目录，使用项目目录下的"输出文件/生成的图片"
+        if 输出目录 is None:
+            # 获取当前文件所在目录的绝对路径
+            当前文件目录 = os.path.dirname(os.path.abspath(__file__))
+            # 向上一级到达项目根目录（AI_hub）
+            项目目录 = os.path.dirname(当前文件目录)
+            self.基础目录 = os.path.join(项目目录, "输出文件/生成的图片")
+        else:
+            self.基础目录 = 输出目录
         # 按日期时间创建子文件夹
         self.当前下载目录 = os.path.join(
             self.基础目录,
@@ -348,8 +356,10 @@ def 主函数():
     print("🖼️  图片自动下载器")
     print("=" * 60)
     
-    # 查找最新的图片链接JSON文件
-    图片目录 = "输出文件/生成的图片"
+    # 获取项目目录绝对路径
+    当前文件目录 = os.path.dirname(os.path.abspath(__file__))
+    项目目录 = os.path.dirname(当前文件目录)
+    图片目录 = os.path.join(项目目录, "输出文件/生成的图片")
     
     if not os.path.exists(图片目录):
         print(f"❌ 找不到目录: {图片目录}")
