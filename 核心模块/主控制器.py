@@ -185,9 +185,10 @@ class 自媒体内容生成器:
             print(f"提示词: {英文提示词[:60]}...")
             
             请求数据 = {
-                "prompt": 英文提示词,
-                "count": 1,
-                "model": "doubao-seedream-4-5-251128"
+                "prompt": 英文提示词, 
+                "size": "1728x2304",  # 3:4 比例
+                "count": 1, # 生成1张图片
+                "model": "doubao-seedream-4-5-251128" # 模型ID
             }
             
             请求头 = {"Content-Type": "application/json"}
