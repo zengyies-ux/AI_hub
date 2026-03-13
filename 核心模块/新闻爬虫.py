@@ -66,6 +66,18 @@ class 新闻爬虫:
             'Upgrade-Insecure-Requests': '1',
             'DNT': '1',
         })
+        
+        # 初始化UserAgent
+        self.ua = None
+        if UA_AVAILABLE:
+            try:
+                self.ua = UserAgent()
+            except:
+                self.ua = None
+        else:
+            self.ua = None
+        
+        # 更新用户代理
         self._更新用户代理()
         
         # 初始化Playwright
@@ -80,15 +92,6 @@ class 新闻爬虫:
                 print(f"⚠️  Playwright初始化失败: {e}")
                 self.playwright = None
                 self.browser = None
-        
-        # 初始化UserAgent
-        if UA_AVAILABLE:
-            try:
-                self.ua = UserAgent()
-            except:
-                self.ua = None
-        else:
-            self.ua = None
     
     def _更新用户代理(self):
         """随机更新User-Agent"""
@@ -215,46 +218,178 @@ class 新闻爬虫:
     def 获取新浪国际新闻(self) -> List[新闻文章]:
         """获取新浪国际新闻"""
         网址 = "https://news.sina.com.cn/world/"
+        新闻列表 = []
         
+        # 方法1: 使用Playwright爬取（推荐）
+        if self.browser:
+            print("   使用Playwright爬取新浪新闻...")
+            try:
+                html_content = self._使用Playwright爬取(网址, 等待时间=8)
+                
+                if html_content:
+                    汤 = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # 尝试多种选择器
+                    选择器列表 = [
+                        'a[href*=".sina.com.cn/"]',  # 所有新浪链接
+                        'a[href*="/world/"]',         # 国际新闻链接
+                        'a[href*="/w/"]',             # 国际新闻链接
+                        'h2 a',                         # h2中的链接
+                        'h3 a',                         # h3中的链接
+                        '.title a',                     # 标题链接
+                        '.news-title a',                # 新闻标题链接
+                        '.news-item a',                 # 新闻项链接
+                        '.blk122 a',                    # 传统新浪样式
+                        'a[title]',                     # 有标题属性的链接
+                    ]
+                    
+                    for 选择器 in 选择器列表:
+                        标题列表 = 汤.select(选择器)
+                        print(f"   选择器 '{选择器}' 找到 {len(标题列表)} 个元素")
+                        
+                        if 标题列表:
+                            for 标题元素 in 标题列表[:20]:
+                                try:
+                                    文本 = 标题元素.get_text(strip=True)
+                                    链接 = 标题元素.get('href', '')
+                                    
+                                    if 文本 and len(文本) > 8 and len(文本) < 100:
+                                        if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载', '新浪']):
+                                            # 确保链接是新浪新闻链接
+                                            if 'sina.com.cn' in 链接:
+                                                文章 = 新闻文章(标题=文本, 链接=链接, 来源='新浪')
+                                                if 链接:
+                                                    文章.内容 = self._提取文章正文(链接, '新浪')
+                                                新闻列表.append(文章)
+                                                print(f"   添加新闻: {文本[:30]}...")
+                                                if len(新闻列表) >= 10:
+                                                    break
+                                except Exception as e:
+                                    pass
+                            if len(新闻列表) >= 8:
+                                break
+                    
+                    if len(新闻列表) >= 8:
+                        print(f"   成功获取 {len(新闻列表)} 条新浪新闻")
+                        return 新闻列表[:10]
+                        
+            except Exception as 错误:
+                print(f"   Playwright爬取失败: {str(错误)[:50]}")
+        
+        # 方法2: 如果Playwright失败，尝试新浪新闻API
+        print("   尝试新浪新闻API...")
         try:
+            # 新浪新闻API
+            api_urls = [
+                "https://interface.sina.cn/news/world.d.json",
+                "https://news.sina.com.cn/api/roll/get?channel=world&page=1&num=20",
+            ]
+            
+            for api_url in api_urls:
+                try:
+                    self.会话.headers.update({
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Referer': 'https://news.sina.com.cn/',
+                        'Accept': 'application/json, text/plain, */*',
+                    })
+                    
+                    响应 = self._带重试请求(api_url)
+                    数据 = 响应.json()
+                    
+                    # 分析API响应
+                    if 'result' in 数据 and 'data' in 数据['result']:
+                        新闻数据 = 数据['result']['data']
+                    elif 'data' in 数据:
+                        新闻数据 = 数据['data']
+                    else:
+                        新闻数据 = []
+                    
+                    for 新闻 in 新闻数据[:20]:
+                        if isinstance(新闻, dict):
+                            标题 = 新闻.get('title', '') or 新闻.get('title', '')
+                            链接 = 新闻.get('url', '') or 新闻.get('href', '')
+                            
+                            if 标题 and 链接:
+                                if len(标题) > 8 and len(标题) < 100:
+                                    if not any(关键词 in 标题 for 关键词 in ['广告', '推广', 'APP', '下载']):
+                                        文章 = 新闻文章(标题=标题, 链接=链接, 来源='新浪')
+                                        新闻列表.append(文章)
+                                        print(f"   API添加新闻: {标题[:30]}...")
+                                        if len(新闻列表) >= 10:
+                                            break
+                    
+                    if len(新闻列表) >= 8:
+                        break
+                        
+                except Exception as e:
+                    print(f"   API尝试失败: {str(e)[:30]}")
+                    continue
+            
+            if len(新闻列表) >= 8:
+                print(f"   成功从API获取 {len(新闻列表)} 条新浪新闻")
+                return 新闻列表[:10]
+                
+        except Exception as 错误:
+            print(f"   API爬取失败: {str(错误)[:50]}")
+        
+        # 方法3: 最后尝试传统方法
+        print("   尝试传统方法...")
+        try:
+            self.会话.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://www.sina.com.cn/',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+            })
+            
             响应 = self._带重试请求(网址)
             响应.encoding = 'utf-8'
             汤 = BeautifulSoup(响应.text, 'html.parser')
             
-            新闻列表 = []
+            # 保存HTML用于调试
+            with open('sina_debug.html', 'w', encoding='utf-8') as f:
+                f.write(响应.text[:5000])  # 只保存前5000字符
+            print("   已保存调试HTML到 sina_debug.html")
             
             # 尝试多种选择器
             选择器列表 = [
-                'h2 a[href*="/world/"]',
-                '.news-item h2 a',
-                '.blk122 a',
-                'a[href*="/w/"]',
+                'a[href*=".sina.com.cn/"]',
+                'h2 a',
+                'h3 a',
+                '.title a',
                 '.news-title a',
             ]
             
             for 选择器 in 选择器列表:
                 标题列表 = 汤.select(选择器)
+                print(f"   传统选择器 '{选择器}' 找到 {len(标题列表)} 个元素")
+                
                 if 标题列表:
                     for 标题元素 in 标题列表[:15]:
-                        文本 = 标题元素.get_text(strip=True)
-                        链接 = 标题元素.get('href', '')
-                        
-                        if 文本 and len(文本) > 8 and len(文本) < 100:
-                            if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载']):
-                                文章 = 新闻文章(标题=文本, 链接=链接, 来源='新浪')
-                                # 尝试获取正文
-                                if 链接:
-                                    文章.内容 = self._提取文章正文(链接, '新浪')
-                                新闻列表.append(文章)
-                                if len(新闻列表) >= 10:
-                                    break
+                        try:
+                            文本 = 标题元素.get_text(strip=True)
+                            链接 = 标题元素.get('href', '')
+                            
+                            if 文本 and len(文本) > 8 and len(文本) < 100:
+                                if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载']):
+                                    if 'sina.com.cn' in 链接:
+                                        文章 = 新闻文章(标题=文本, 链接=链接, 来源='新浪')
+                                        if 链接:
+                                            文章.内容 = self._提取文章正文(链接, '新浪')
+                                        新闻列表.append(文章)
+                                        print(f"   传统添加新闻: {文本[:30]}...")
+                                        if len(新闻列表) >= 10:
+                                            break
+                        except Exception as e:
+                            pass
                     if len(新闻列表) >= 8:
                         break
             
+            print(f"   传统方法获取 {len(新闻列表)} 条新浪新闻")
             return 新闻列表[:10]
             
         except Exception as 错误:
-            print(f"   新浪新闻获取失败: {str(错误)}")
+            print(f"   新浪新闻获取失败: {str(错误)[:50]}")
             return []
     
     def 获取网易国际新闻(self) -> List[新闻文章]:
@@ -362,56 +497,56 @@ class 新闻爬虫:
         if len(新闻列表) < 5:
             print("   尝试API接口...")
             搜索关键词列表 = ['国际新闻', '国际热点', '国际时事']
-        
-        for 关键词 in 搜索关键词列表:
-            try:
-                # 百度新闻搜索API
-                网址 = f"https://news.baidu.com/ns?word={关键词}&tn=news&from=news&cl=2&rn=20&ct=1"
-                
-                self.会话.headers.update({
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://news.baidu.com/',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'zh-CN,zh;q=0.9',
-                })
-                
-                响应 = self._带重试请求(网址)
-                响应.encoding = 'utf-8'
-                汤 = BeautifulSoup(响应.text, 'html.parser')
-                
-                # 尝试多种选择器
-                选择器列表 = [
-                    '.result a[href]',
-                    '.news-title a',
-                    'h3 a',
-                    'a[href*="baidu.com"]',
-                    '.c-title a',
-                ]
-                
-                for 选择器 in 选择器列表:
-                    标题列表 = 汤.select(选择器)
-                    if 标题列表:
-                        for 标题元素 in 标题列表[:15]:
-                            文本 = 标题元素.get_text(strip=True)
-                            链接 = 标题元素.get('href', '')
-                            
-                            if 文本 and len(文本) > 8 and len(文本) < 100:
-                                if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载', '百度']):
-                                    文章 = 新闻文章(标题=文本, 链接=链接, 来源='百度')
-                                    if 链接:
-                                        文章.内容 = self._提取文章正文(链接, '百度')
-                                    新闻列表.append(文章)
-                                    if len(新闻列表) >= 10:
-                                        break
-                        if len(新闻列表) >= 8:
-                            break
-                
-                if len(新闻列表) >= 8:
-                    break
+            
+            for 关键词 in 搜索关键词列表:
+                try:
+                    # 百度新闻搜索API
+                    网址 = f"https://news.baidu.com/ns?word={关键词}&tn=news&from=news&cl=2&rn=20&ct=1"
                     
-            except Exception as 错误:
-                print(f"   百度新闻搜索尝试失败: {str(错误)[:50]}")
-                continue
+                    self.会话.headers.update({
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Referer': 'https://news.baidu.com/',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'zh-CN,zh;q=0.9',
+                    })
+                    
+                    响应 = self._带重试请求(网址)
+                    响应.encoding = 'utf-8'
+                    汤 = BeautifulSoup(响应.text, 'html.parser')
+                    
+                    # 尝试多种选择器
+                    选择器列表 = [
+                        '.result a[href]',
+                        '.news-title a',
+                        'h3 a',
+                        'a[href*="baidu.com"]',
+                        '.c-title a',
+                    ]
+                    
+                    for 选择器 in 选择器列表:
+                        标题列表 = 汤.select(选择器)
+                        if 标题列表:
+                            for 标题元素 in 标题列表[:15]:
+                                文本 = 标题元素.get_text(strip=True)
+                                链接 = 标题元素.get('href', '')
+                                
+                                if 文本 and len(文本) > 8 and len(文本) < 100:
+                                    if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载', '百度']):
+                                        文章 = 新闻文章(标题=文本, 链接=链接, 来源='百度')
+                                        if 链接:
+                                            文章.内容 = self._提取文章正文(链接, '百度')
+                                        新闻列表.append(文章)
+                                        if len(新闻列表) >= 10:
+                                            break
+                            if len(新闻列表) >= 8:
+                                break
+                    
+                    if len(新闻列表) >= 8:
+                        break
+                        
+                except Exception as 错误:
+                    print(f"   百度新闻搜索尝试失败: {str(错误)[:50]}")
+                    continue
         
         # 方法2: 如果搜索失败，尝试百度新闻首页
         if len(新闻列表) < 5:
@@ -524,60 +659,60 @@ class 新闻爬虫:
                 "https://pacaio.match.qq.com/irs/rcd?cid=146&token=49cbb2154853ef1a74dc4d8d6f6a4d8f&ext=国际&num=20",
                 "https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http_proxy/list?sub_srv_id=world&srv_id=pc&limit=20&page=1&is_cache=0",
             ]
-        
-        for 网址 in API地址列表:
-            try:
-                self.会话.headers.update({
-                    'Referer': 'https://new.qq.com/',
-                    'Origin': 'https://new.qq.com',
-                    'Accept': 'application/json, text/plain, */*',
-                    'Accept-Language': 'zh-CN,zh;q=0.9',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Cookie': 'pgv_pvid=1234567890; pgv_info=ssid=s1234567890',
-                })
-                
-                响应 = self._带重试请求(网址)
-                
+            
+            for 网址 in API地址列表:
                 try:
-                    数据 = 响应.json()
+                    self.会话.headers.update({
+                        'Referer': 'https://new.qq.com/',
+                        'Origin': 'https://new.qq.com',
+                        'Accept': 'application/json, text/plain, */*',
+                        'Accept-Language': 'zh-CN,zh;q=0.9',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Cookie': 'pgv_pvid=1234567890; pgv_info=ssid=s1234567890',
+                    })
                     
-                    # 处理不同的API响应格式
-                    项目列表 = None
+                    响应 = self._带重试请求(网址)
                     
-                    # 格式1: data.list
-                    if 数据 and isinstance(数据, dict) and 'data' in 数据:
-                        数据对象 = 数据['data']
-                        if isinstance(数据对象, dict) and 'list' in 数据对象:
-                            项目列表 = 数据对象['list']
-                    
-                    # 格式2: 直接是列表
-                    elif 数据 and isinstance(数据, list):
-                        项目列表 = 数据
-                    
-                    if 项目列表 and isinstance(项目列表, list):
-                        for 项目 in 项目列表[:15]:
-                            if 项目 and isinstance(项目, dict):
-                                标题 = 项目.get('title', '') or 项目.get('article_title', '')
-                                链接 = 项目.get('url', '') or 项目.get('link', '') or 项目.get('article_url', '')
-                                
-                                if 标题 and len(标题) > 8 and len(标题) < 100:
-                                    if not any(关键词 in 标题 for 关键词 in ['广告', '推广', 'APP', '下载', '腾讯视频', '会员']):
-                                        文章 = 新闻文章(标题=标题, 链接=链接, 来源='腾讯')
-                                        if 链接:
-                                            文章.内容 = self._提取文章正文(链接, '腾讯')
-                                        新闻列表.append(文章)
-                                        if len(新闻列表) >= 10:
-                                            break
-                    
-                    if len(新闻列表) >= 8:
-                        break
+                    try:
+                        数据 = 响应.json()
                         
-                except json.JSONDecodeError:
-                    pass
+                        # 处理不同的API响应格式
+                        项目列表 = None
+                        
+                        # 格式1: data.list
+                        if 数据 and isinstance(数据, dict) and 'data' in 数据:
+                            数据对象 = 数据['data']
+                            if isinstance(数据对象, dict) and 'list' in 数据对象:
+                                项目列表 = 数据对象['list']
+                        
+                        # 格式2: 直接是列表
+                        elif 数据 and isinstance(数据, list):
+                            项目列表 = 数据
+                        
+                        if 项目列表 and isinstance(项目列表, list):
+                            for 项目 in 项目列表[:15]:
+                                if 项目 and isinstance(项目, dict):
+                                    标题 = 项目.get('title', '') or 项目.get('article_title', '')
+                                    链接 = 项目.get('url', '') or 项目.get('link', '') or 项目.get('article_url', '')
+                                    
+                                    if 标题 and len(标题) > 8 and len(标题) < 100:
+                                        if not any(关键词 in 标题 for 关键词 in ['广告', '推广', 'APP', '下载', '腾讯视频', '会员']):
+                                            文章 = 新闻文章(标题=标题, 链接=链接, 来源='腾讯')
+                                            if 链接:
+                                                文章.内容 = self._提取文章正文(链接, '腾讯')
+                                            新闻列表.append(文章)
+                                            if len(新闻列表) >= 10:
+                                                break
+                        
+                        if len(新闻列表) >= 8:
+                            break
+                            
+                    except json.JSONDecodeError:
+                        pass
                     
-            except Exception as 错误:
-                print(f"   腾讯新闻API尝试失败: {str(错误)[:50]}")
-                continue
+                except Exception as 错误:
+                    print(f"   腾讯新闻API尝试失败: {str(错误)[:50]}")
+                    continue
         
         # 方法2: 如果API失败，尝试网页爬取
         if len(新闻列表) < 5:
