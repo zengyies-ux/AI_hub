@@ -188,6 +188,7 @@ class 自媒体内容生成器:
                 "prompt": 英文提示词, 
                 "size": "1728x2304",  # 3:4 比例
                 "count": 1, # 生成1张图片
+                "watermark": False, # 关闭水印
                 "model": "doubao-seedream-4-5-251128" # 模型ID
             }
             

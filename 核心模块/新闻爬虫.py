@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 新闻爬虫模块 - 爬取国际新闻
+支持动态网页渲染（使用Playwright）
 """
 
 import os
@@ -13,6 +14,22 @@ from typing import List, Dict, Optional
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
+
+# 尝试导入Playwright（如果可用）
+try:
+    from playwright.sync_api import sync_playwright, Browser, Page
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    print("⚠️  Playwright未安装，动态网页爬取功能将不可用")
+    print("   安装方法: pip install playwright && playwright install chromium")
+
+# 尝试导入fake-useragent（如果可用）
+try:
+    from fake_useragent import UserAgent
+    UA_AVAILABLE = True
+except ImportError:
+    UA_AVAILABLE = False
 
 
 class 新闻文章:
@@ -50,9 +67,39 @@ class 新闻爬虫:
             'DNT': '1',
         })
         self._更新用户代理()
+        
+        # 初始化Playwright
+        self.playwright = None
+        self.browser = None
+        if PLAYWRIGHT_AVAILABLE:
+            try:
+                self.playwright = sync_playwright().start()
+                self.browser = self.playwright.chromium.launch(headless=True)
+                print("✅ Playwright浏览器已启动")
+            except Exception as e:
+                print(f"⚠️  Playwright初始化失败: {e}")
+                self.playwright = None
+                self.browser = None
+        
+        # 初始化UserAgent
+        if UA_AVAILABLE:
+            try:
+                self.ua = UserAgent()
+            except:
+                self.ua = None
+        else:
+            self.ua = None
     
     def _更新用户代理(self):
         """随机更新User-Agent"""
+        if self.ua:
+            try:
+                self.会话.headers['User-Agent'] = self.ua.random
+                return
+            except:
+                pass
+        
+        # 备用方案：使用预设列表
         用户代理列表 = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -91,6 +138,39 @@ class 新闻爬虫:
                 raise
         
         raise requests.exceptions.RequestException(f"Failed after {最大重试次数} attempts")
+    
+    def _使用Playwright爬取(self, 网址: str, 等待时间: int = 3) -> Optional[str]:
+        """使用Playwright爬取动态网页"""
+        if not self.browser:
+            return None
+        
+        try:
+            page = self.browser.new_page()
+            
+            # 设置随机User-Agent
+            if self.ua:
+                try:
+                    page.set_extra_http_headers({'User-Agent': self.ua.random})
+                except:
+                    pass
+            
+            # 访问页面
+            page.goto(网址, wait_until='networkidle', timeout=30000)
+            
+            # 等待页面加载
+            time.sleep(等待时间)
+            
+            # 获取页面HTML
+            html_content = page.content()
+            
+            # 关闭页面
+            page.close()
+            
+            return html_content
+            
+        except Exception as 错误:
+            print(f"   Playwright爬取失败: {str(错误)[:50]}")
+            return None
     
     def _提取文章正文(self, 网址: str, 来源: str) -> str:
         """提取新闻正文内容"""
@@ -225,8 +305,63 @@ class 新闻爬虫:
         """获取百度国际新闻"""
         新闻列表 = []
         
-        # 方法1: 使用百度新闻搜索接口
-        搜索关键词列表 = ['国际新闻', '国际热点', '国际时事']
+        # 方法1: 使用Playwright爬取（推荐）
+        if self.browser:
+            print("   使用Playwright爬取百度新闻...")
+            网页地址列表 = [
+                "https://news.baidu.com",
+                "https://news.baidu.com/guonei",
+                "https://news.baidu.com/world",
+            ]
+            
+            for 网址 in 网页地址列表:
+                try:
+                    html_content = self._使用Playwright爬取(网址, 等待时间=5)
+                    
+                    if html_content:
+                        汤 = BeautifulSoup(html_content, 'html.parser')
+                        
+                        # 尝试多种选择器
+                        选择器列表 = [
+                            '.hotnews a',
+                            '.bold-item a',
+                            '.item a',
+                            'a[href*="/sid/"]',
+                            '.news-title a',
+                            'h3 a',
+                            '.result a',
+                            '.c-title a',
+                        ]
+                        
+                        for 选择器 in 选择器列表:
+                            标题列表 = 汤.select(选择器)
+                            if 标题列表:
+                                for 标题元素 in 标题列表[:15]:
+                                    文本 = 标题元素.get_text(strip=True)
+                                    链接 = 标题元素.get('href', '')
+                                    
+                                    if 文本 and len(文本) > 8 and len(文本) < 100:
+                                        if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载', '百度']):
+                                            文章 = 新闻文章(标题=文本, 链接=链接, 来源='百度')
+                                            if 链接:
+                                                文章.内容 = self._提取文章正文(链接, '百度')
+                                            新闻列表.append(文章)
+                                            if len(新闻列表) >= 10:
+                                                break
+                                if len(新闻列表) >= 8:
+                                    break
+                        
+                        if len(新闻列表) >= 8:
+                            break
+                            
+                except Exception as 错误:
+                    print(f"   Playwright爬取失败: {str(错误)[:50]}")
+                    continue
+        
+        # 方法2: 如果Playwright失败，尝试百度新闻搜索接口
+        if len(新闻列表) < 5:
+            print("   尝试API接口...")
+            搜索关键词列表 = ['国际新闻', '国际热点', '国际时事']
         
         for 关键词 in 搜索关键词列表:
             try:
@@ -330,12 +465,65 @@ class 新闻爬虫:
         """获取腾讯国际新闻"""
         新闻列表 = []
         
-        # 方法1: 使用腾讯新闻API接口
-        API地址列表 = [
-            "https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http_proxy/list?sub_srv_id=world&srv_id=pc&limit=20&page=1",
-            "https://pacaio.match.qq.com/irs/rcd?cid=146&token=49cbb2154853ef1a74dc4d8d6f6a4d8f&ext=国际&num=20",
-            "https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http_proxy/list?sub_srv_id=world&srv_id=pc&limit=20&page=1&is_cache=0",
-        ]
+        # 方法1: 使用Playwright爬取（推荐）
+        if self.browser:
+            print("   使用Playwright爬取腾讯新闻...")
+            网页地址列表 = [
+                "https://new.qq.com/ch/world/",
+                "https://news.qq.com/world/",
+            ]
+            
+            for 网址 in 网页地址列表:
+                try:
+                    html_content = self._使用Playwright爬取(网址, 等待时间=5)
+                    
+                    if html_content:
+                        汤 = BeautifulSoup(html_content, 'html.parser')
+                        
+                        # 尝试多种选择器
+                        选择器列表 = [
+                            '.detail .title a',
+                            '.news-list .title a',
+                            'a[href*="/rain/a/"]',
+                            '.content-list a',
+                            'h2 a',
+                            '.title a',
+                            'a[href*="qq.com"]',
+                        ]
+                        
+                        for 选择器 in 选择器列表:
+                            标题列表 = 汤.select(选择器)
+                            if 标题列表:
+                                for 标题元素 in 标题列表[:15]:
+                                    文本 = 标题元素.get_text(strip=True)
+                                    链接 = 标题元素.get('href', '')
+                                    
+                                    if 文本 and len(文本) > 8 and len(文本) < 100:
+                                        if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载', '腾讯视频', '会员']):
+                                            文章 = 新闻文章(标题=文本, 链接=链接, 来源='腾讯')
+                                            if 链接:
+                                                文章.内容 = self._提取文章正文(链接, '腾讯')
+                                            新闻列表.append(文章)
+                                            if len(新闻列表) >= 10:
+                                                break
+                                if len(新闻列表) >= 8:
+                                    break
+                        
+                        if len(新闻列表) >= 8:
+                            break
+                            
+                except Exception as 错误:
+                    print(f"   Playwright爬取失败: {str(错误)[:50]}")
+                    continue
+        
+        # 方法2: 如果Playwright失败，尝试API接口
+        if len(新闻列表) < 5:
+            print("   尝试API接口...")
+            API地址列表 = [
+                "https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http_proxy/list?sub_srv_id=world&srv_id=pc&limit=20&page=1",
+                "https://pacaio.match.qq.com/irs/rcd?cid=146&token=49cbb2154853ef1a74dc4d8d6f6a4d8f&ext=国际&num=20",
+                "https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http_proxy/list?sub_srv_id=world&srv_id=pc&limit=20&page=1&is_cache=0",
+            ]
         
         for 网址 in API地址列表:
             try:
@@ -529,27 +717,36 @@ def 主函数():
     # 初始化爬虫
     爬虫 = 新闻爬虫()
     
-    # 获取所有新闻
-    所有新闻 = 爬虫.获取所有新闻()
-    
-    print("\n" + "=" * 60)
-    print(f"共获取到 {len(所有新闻)} 条国际新闻")
-    print("=" * 60)
-    
-    if len(所有新闻) == 0:
-        print("\n未能获取到任何新闻，请检查网络连接或稍后重试。")
-        return
-    
-    # 保存爬取的新闻
-    爬取路径 = 保存爬取的新闻(所有新闻)
-    print(f"\n✅ 爬取内容已保存到：{爬取路径}")
-    
-    # 保存为JSON格式
-    现在 = datetime.now()
-    JSON文件 = os.path.join("输出文件/爬取的新闻", f"{现在.strftime('%Y%m%d_%H%M%S')}_爬取的新闻.json")
-    with open(JSON文件, 'w', encoding='utf-8') as f:
-        json.dump([新闻.转为字典() for 新闻 in 所有新闻], f, ensure_ascii=False, indent=2)
-    print(f"✅ JSON格式已保存到：{JSON文件}")
+    try:
+        # 获取所有新闻
+        所有新闻 = 爬虫.获取所有新闻()
+        
+        print("\n" + "=" * 60)
+        print(f"共获取到 {len(所有新闻)} 条国际新闻")
+        print("=" * 60)
+        
+        if len(所有新闻) == 0:
+            print("\n未能获取到任何新闻，请检查网络连接或稍后重试。")
+            return
+        
+        # 保存爬取的新闻
+        爬取路径 = 保存爬取的新闻(所有新闻)
+        print(f"\n✅ 爬取内容已保存到：{爬取路径}")
+        
+        # 保存为JSON格式
+        现在 = datetime.now()
+        JSON文件 = os.path.join("输出文件/爬取的新闻", f"{现在.strftime('%Y%m%d_%H%M%S')}_爬取的新闻.json")
+        with open(JSON文件, 'w', encoding='utf-8') as f:
+            json.dump([新闻.转为字典() for 新闻 in 所有新闻], f, ensure_ascii=False, indent=2)
+        print(f"✅ JSON格式已保存到：{JSON文件}")
+        
+    finally:
+        # 清理Playwright资源
+        if 爬虫.browser:
+            爬虫.browser.close()
+        if 爬虫.playwright:
+            爬虫.playwright.stop()
+        print("\n✅ 资源清理完成")
 
 
 if __name__ == "__main__":
