@@ -104,7 +104,8 @@ class 新闻分析器:
                     {"role": "user", "content": 用户提示}
                 ],
                 temperature=0.7,
-                max_tokens=3000
+                max_tokens=3000,
+                timeout=120  # 设置120秒超时
             )
             
             分析结果 = 响应.choices[0].message.content

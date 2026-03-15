@@ -126,7 +126,7 @@ class 新闻爬虫:
                 
                 响应 = self.会话.get(
                     网址,
-                    timeout=20,
+                    timeout=60,  # 增加超时时间到60秒
                     allow_redirects=True,
                     verify=False
                 )
@@ -147,6 +147,7 @@ class 新闻爬虫:
         if not self.browser:
             return None
         
+        page = None
         try:
             page = self.browser.new_page()
             
@@ -157,8 +158,18 @@ class 新闻爬虫:
                 except:
                     pass
             
-            # 访问页面
-            page.goto(网址, wait_until='networkidle', timeout=30000)
+            # 设置更宽松的页面加载策略
+            page.set_default_timeout(60000)  # 设置默认超时为60秒
+            
+            # 访问页面，使用更宽松的等待策略
+            try:
+                page.goto(网址, wait_until='domcontentloaded', timeout=60000)
+            except Exception as e:
+                # 如果domcontentloaded失败，尝试load策略
+                try:
+                    page.goto(网址, wait_until='load', timeout=60000)
+                except:
+                    pass
             
             # 等待页面加载
             time.sleep(等待时间)
@@ -173,6 +184,11 @@ class 新闻爬虫:
             
         except Exception as 错误:
             print(f"   Playwright爬取失败: {str(错误)[:50]}")
+            if page:
+                try:
+                    page.close()
+                except:
+                    pass
             return None
     
     def _提取文章正文(self, 网址: str, 来源: str) -> str:
@@ -348,16 +364,18 @@ class 新闻爬虫:
             
             # 保存HTML用于调试
             with open('sina_debug.html', 'w', encoding='utf-8') as f:
-                f.write(响应.text[:5000])  # 只保存前5000字符
+                f.write(响应.text[:10000])  # 保存更多字符用于调试
             print("   已保存调试HTML到 sina_debug.html")
             
-            # 尝试多种选择器
+            # 尝试多种选择器，优先使用更具体的选择器
             选择器列表 = [
-                'a[href*=".sina.com.cn/"]',
-                'h2 a',
-                'h3 a',
-                '.title a',
-                '.news-title a',
+                'a[href*="/world/"]',         # 国际新闻链接
+                'a[href*="/w/"]',             # 国际新闻链接
+                'h2 a',                         # h2中的链接
+                'h3 a',                         # h3中的链接
+                '.title a',                     # 标题链接
+                '.news-title a',                # 新闻标题链接
+                'a[href*=".sina.com.cn/"]',  # 所有新浪链接（最后尝试）
             ]
             
             for 选择器 in 选择器列表:
@@ -365,14 +383,21 @@ class 新闻爬虫:
                 print(f"   传统选择器 '{选择器}' 找到 {len(标题列表)} 个元素")
                 
                 if 标题列表:
-                    for 标题元素 in 标题列表[:15]:
+                    for 标题元素 in 标题列表[:20]:
                         try:
                             文本 = 标题元素.get_text(strip=True)
                             链接 = 标题元素.get('href', '')
                             
-                            if 文本 and len(文本) > 8 and len(文本) < 100:
-                                if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载']):
-                                    if 'sina.com.cn' in 链接:
+                            # 更宽松的标题长度检查
+                            if 文本 and len(文本) > 5 and len(文本) < 150:
+                                # 过滤掉明显不是新闻的内容
+                                if not any(关键词 in 文本 for 关键词 in ['广告', '推广', 'APP', '下载', '新浪', '登录', '注册', '更多', '首页']):
+                                    # 确保链接是新浪新闻链接
+                                    if 'sina.com.cn' in 链接 or 链接.startswith('/'):
+                                        # 处理相对链接
+                                        if 链接.startswith('/'):
+                                            链接 = 'https://news.sina.com.cn' + 链接
+                                        
                                         文章 = 新闻文章(标题=文本, 链接=链接, 来源='新浪')
                                         if 链接:
                                             文章.内容 = self._提取文章正文(链接, '新浪')
